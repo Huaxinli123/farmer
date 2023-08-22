@@ -49,7 +49,9 @@ type RouteServerConfig =
         HubRoutingPreference: HubRoutingPreference option
         BGPConnections: RSBGPConnectionConfig list
         VirtualNetwork: LinkedResource option
-        SubnetPrefix: IPAddressCidr
+        SubnetName: string option
+        SubnetPrefix: IPAddressCidr option
+        LinkedSubnet: LinkedResource option
         Tags: Map<string, string>
     }
 
@@ -62,40 +64,58 @@ type RouteServerConfig =
                     this.VirtualNetwork
                     |> Option.defaultWith (fun _ -> raiseFarmer "Must set 'vnet' for route server")
 
+                match this.LinkedSubnet with
+                | Some subnet ->
+                    //ip configuration
+                    {
+                        RouteServerIPConfig.Name = ResourceName $"{this.Name.Value}-ipconfig"
+                        RouteServer = Managed(routeServers.resourceId this.Name)
+                        PublicIpAddress = LinkedResource.Managed(publicIPAddresses.resourceId $"{this.Name.Value}-pip")
+                        SubnetId =
+                            LinkedResource.Managed(
+                                subnets.resourceId (ResourceName vnetId.Name.Value, subnet.Name)
+                            )
+                    }
+                | None ->
+                    match this.SubnetName, this.SubnetPrefix with
+                    | Some subnetName, Some subnetPrefix ->
+                        //subnet
+                        {
+                            Subnet.Name = ResourceName subnetName
+                            Prefix = IPAddressCidr.format subnetPrefix
+                            VirtualNetwork = Some(vnetId)
+                            NetworkSecurityGroup = None
+                            Delegations = []
+                            NatGateway = None
+                            ServiceEndpoints = []
+                            AssociatedServiceEndpointPolicies = []
+                            PrivateEndpointNetworkPolicies = None
+                            PrivateLinkServiceNetworkPolicies = None
+                        }
+
+                        //ip configuration
+                        {
+                            RouteServerIPConfig.Name = ResourceName $"{this.Name.Value}-ipconfig"
+                            RouteServer = Managed(routeServers.resourceId this.Name)
+                            PublicIpAddress = LinkedResource.Managed(publicIPAddresses.resourceId $"{this.Name.Value}-pip")
+                            SubnetId =
+                                LinkedResource.Managed(
+                                    subnets.resourceId (ResourceName vnetId.Name.Value, ResourceName subnetName)
+                                )
+                        }
+                    | _ ->
+                        raiseFarmer
+                            $"subnetName and subnetPrefix must be specified for a new subnet if no existing subnet provided."
+                
                 //public ip
                 {
-                    PublicIpAddress.Name = ResourceName $"{this.Name.Value}-publicip"
+                    PublicIpAddress.Name = ResourceName $"{this.Name.Value}-pip"
                     AvailabilityZone = None
                     Location = location
                     Sku = PublicIpAddress.Sku.Standard
                     AllocationMethod = PublicIpAddress.AllocationMethod.Static
                     DomainNameLabel = None
                     Tags = this.Tags
-                }
-
-                //subnet
-                {
-                    Subnet.Name = ResourceName "RouteServerSubnet"
-                    Prefix = IPAddressCidr.format this.SubnetPrefix
-                    VirtualNetwork = Some(vnetId)
-                    NetworkSecurityGroup = None
-                    Delegations = []
-                    NatGateway = None
-                    ServiceEndpoints = []
-                    AssociatedServiceEndpointPolicies = []
-                    PrivateEndpointNetworkPolicies = None
-                    PrivateLinkServiceNetworkPolicies = None
-                }
-
-                //ip configuration
-                {
-                    RouteServerIPConfig.Name = ResourceName $"{this.Name.Value}-ipconfig"
-                    RouteServer = Managed(routeServers.resourceId this.Name)
-                    PublicIpAddress = LinkedResource.Managed(publicIPAddresses.resourceId $"{this.Name.Value}-publicip")
-                    SubnetId =
-                        LinkedResource.Managed(
-                            subnets.resourceId (ResourceName vnetId.Name.Value, ResourceName "RouteServerSubnet")
-                        )
                 }
 
                 //route server
@@ -138,11 +158,9 @@ type RouteServerBuilder() =
             HubRoutingPreference = None
             BGPConnections = []
             VirtualNetwork = None
-            SubnetPrefix =
-                {
-                    Address = System.Net.IPAddress.Parse("10.0.100.0")
-                    Prefix = 16
-                }
+            SubnetName = None
+            SubnetPrefix = None
+            LinkedSubnet = None
             Tags = Map.empty
         }
 
@@ -170,10 +188,21 @@ type RouteServerBuilder() =
             BGPConnections = connections @ state.BGPConnections
         }
 
+     // create subnet through Farmer. Need to specify subnet_name and subnet_prefix
+    [<CustomOperation "subnet_name">]
+    member _.SubnetName(state: RouteServerConfig, name) = { state with SubnetName = Some(name) }
+
     [<CustomOperation "subnet_prefix">]
     member _.SubnetPrefix(state: RouteServerConfig, prefix) =
         { state with
-            SubnetPrefix = IPAddressCidr.parse prefix
+            SubnetPrefix = Some(IPAddressCidr.parse prefix)
+        }
+
+    // linked to external existing subnet
+    [<CustomOperation "link_to_subnet">]
+    member _.LinkToSubnet(state: RouteServerConfig, name: string) =
+        { state with
+            LinkedSubnet = Some(Unmanaged(subnets.resourceId (ResourceName name)))
         }
 
     // linked to managed vnet created by Farmer and linked by user

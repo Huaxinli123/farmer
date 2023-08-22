@@ -830,7 +830,7 @@ let tests =
                     "Incorrect private link service ID"
             }
 
-            test "Creates basic route server" {
+            test "Creates basic route server with new subnet" {
                 let deployment =
                     arm {
                         location Location.EastUS
@@ -844,6 +844,7 @@ let tests =
                                 routeServer {
                                     name "my-route-server"
                                     sku RouteServer.Sku.Standard
+                                    subnet_name "my-subnet"
                                     subnet_prefix "10.0.12.0/24"
                                     link_to_vnet (virtualNetworks.resourceId "test-vnet")
 
@@ -891,7 +892,7 @@ let tests =
 
                 Expect.equal
                     publicipName
-                    (JToken.op_Implicit "my-route-server-publicip")
+                    (JToken.op_Implicit "my-route-server-pip")
                     "Incorrect default value for public ip name"
 
                 let publicipProps = publicip.["properties"]
@@ -911,7 +912,7 @@ let tests =
 
                 Expect.equal
                     subnetName
-                    (JToken.op_Implicit "test-vnet/RouteServerSubnet")
+                    (JToken.op_Implicit "test-vnet/my-subnet")
                     "Incorrect default value for subnet name"
 
                 let subnetProps = subnet.["properties"]
@@ -940,7 +941,7 @@ let tests =
 
                 Expect.equal
                     (ipConfigDependencies.[0].ToString())
-                    "[resourceId(\u0027Microsoft.Network/publicIPAddresses\u0027, \u0027my-route-server-publicip\u0027)]"
+                    "[resourceId(\u0027Microsoft.Network/publicIPAddresses\u0027, \u0027my-route-server-pip\u0027)]"
                     "Incorrect ipConfig dependencies"
 
                 Expect.equal
@@ -950,21 +951,21 @@ let tests =
 
                 Expect.equal
                     (ipConfigDependencies.[2].ToString())
-                    "[resourceId(\u0027Microsoft.Network/virtualNetworks/subnets\u0027, \u0027test-vnet\u0027, \u0027RouteServerSubnet\u0027)]"
+                    "[resourceId(\u0027Microsoft.Network/virtualNetworks/subnets\u0027, \u0027test-vnet\u0027, \u0027my-subnet\u0027)]"
                     "Incorrect ipConfig dependencies"
 
                 let ipConfigPip = ipConfig.SelectToken("properties.publicIPAddress.id").ToString()
 
                 Expect.equal
                     ipConfigPip
-                    "[resourceId(\u0027Microsoft.Network/publicIPAddresses\u0027, \u0027my-route-server-publicip\u0027)]"
+                    "[resourceId(\u0027Microsoft.Network/publicIPAddresses\u0027, \u0027my-route-server-pip\u0027)]"
                     "Incorrect publicIPAddress id for ipConfig"
 
                 let ipConfigSubnet = ipConfig.SelectToken("properties.subnet.id").ToString()
 
                 Expect.equal
                     ipConfigSubnet
-                    "[resourceId(\u0027Microsoft.Network/virtualNetworks/subnets\u0027, \u0027test-vnet\u0027, \u0027RouteServerSubnet\u0027)]"
+                    "[resourceId(\u0027Microsoft.Network/virtualNetworks/subnets\u0027, \u0027test-vnet\u0027, \u0027my-subnet\u0027)]"
                     "Incorrect subnet id for ipConfig"
 
                 //validate route server generated
@@ -1059,6 +1060,51 @@ let tests =
 
             }
 
+            test "Creates basic route server with existing vnet subnet" {
+                let deployment =
+                    arm {
+                        location Location.EastUS
+
+                        add_resources
+                            [
+                                routeServer {
+                                    name "my-route-server"
+                                    sku RouteServer.Sku.Standard
+                                    link_to_subnet "my-subnet"
+                                    link_to_vnet "test-vnet"
+                                }
+                            ]
+                    }
+
+                let jobj = deployment.Template |> Writer.toJson |> JObject.Parse
+                let templateStr = jobj.ToString()
+                
+                //validate ip configuration generated
+                let ipConfig =
+                    jobj.SelectToken "resources[?(@.type=='Microsoft.Network/virtualHubs/ipConfigurations')]"
+
+                Expect.isNotNull ipConfig "ipConfig should be generated"
+
+                let ipConfigName = ipConfig.["name"]
+
+                Expect.equal
+                    ipConfigName
+                    (JToken.op_Implicit "my-route-server/my-route-server-ipconfig")
+                    "Incorrect default value for ipConfig name"
+
+                let ipConfigDependencies =
+                    jobj.SelectToken "resources[?(@.type=='Microsoft.Network/virtualHubs/ipConfigurations')].dependsOn"
+                    :?> JArray
+
+                Expect.isNotNull ipConfigDependencies "Missing dependency for ipConfig"
+                Expect.hasLength ipConfigDependencies 3 "Incorrect number of dependencies for ipConfig"
+
+                Expect.equal
+                    (ipConfigDependencies.[2].ToString())
+                    "[resourceId(\u0027Microsoft.Network/virtualNetworks/subnets\u0027, \u0027test-vnet\u0027, \u0027my-subnet\u0027)]"
+                    "Incorrect ipConfig dependencies"
+            }
+            
             test "Creates basic network interface with static ip" {
                 let deployment =
                     arm {
