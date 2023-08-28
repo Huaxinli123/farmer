@@ -24,7 +24,7 @@ let networkProfiles =
     ResourceType("Microsoft.Network/networkProfiles", "2020-04-01")
 
 let publicIPAddresses =
-    ResourceType("Microsoft.Network/publicIPAddresses", "2018-11-01")
+    ResourceType("Microsoft.Network/publicIPAddresses", "2022-05-01")
 
 let publicIPPrefixes =
     ResourceType("Microsoft.Network/publicIPPrefixes", "2021-08-01")
@@ -62,7 +62,10 @@ let routeServerIPConfigs =
 
 let routeServerBGPConnections =
     ResourceType("Microsoft.Network/virtualHubs/bgpConnections", "2022-11-01")
-
+    
+let consoleConnections =
+    ResourceType("Microsoft.BareMetal/ConsoleConnections", "2022-11-01")
+    
 type SubnetReference =
     | ViaManagedVNet of (ResourceId * ResourceName)
     | Direct of LinkedResource
